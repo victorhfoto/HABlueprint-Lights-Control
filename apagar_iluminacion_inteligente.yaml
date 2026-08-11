@@ -1,10 +1,12 @@
+```yaml
 blueprint:
   name: 💡 Apagar iluminación inteligente
   description: >
     Apaga luces y switches seleccionados mediante etiquetas, áreas o
-    entidades concretas. Permite excluir áreas y entidades, seleccionar
-    si se incluyen luces y/o switches, y ejecutar el apagado al salir
-    de casa, mediante un tag RFID o a una hora determinada.
+    entidades concretas. Permite excluir áreas y entidades, ejecutar
+    el apagado cuando la casa queda vacía, mediante un tag RFID o a
+    una hora determinada, y notificar a la persona que acaba de salir
+    cuando es la última persona que abandona la casa.
   domain: automation
 
   input:
@@ -16,8 +18,8 @@ blueprint:
     etiquetas:
       name: 🏷️ Etiquetas
       description: >
-        Etiquetas de Home Assistant. Se incluirán las entidades light
-        y switch que tengan alguna de estas etiquetas.
+        Selecciona una o varias etiquetas. Se incluirán las entidades
+        light y switch que tengan alguna de estas etiquetas.
       default: []
       selector:
         label:
@@ -26,7 +28,8 @@ blueprint:
     areas_incluir:
       name: 🏠 Áreas a incluir
       description: >
-        Incluye las entidades light y switch pertenecientes a estas áreas.
+        Incluye todas las entidades light y switch pertenecientes
+        a estas áreas.
       default: []
       selector:
         area:
@@ -35,8 +38,9 @@ blueprint:
     areas_excluir:
       name: 🚫 Áreas a excluir
       description: >
-        Las entidades pertenecientes a estas áreas nunca se apagarán
-        ni aparecerán en la notificación.
+        Excluye las entidades de estas áreas.
+        Si un área también está seleccionada en Áreas a incluir,
+        la inclusión tiene prioridad.
       default: []
       selector:
         area:
@@ -45,8 +49,8 @@ blueprint:
     entidades_extra:
       name: ➕ Entidades adicionales
       description: >
-        Permite añadir manualmente luces o switches aunque no tengan
-        ninguna de las etiquetas o áreas seleccionadas.
+        Añade manualmente entidades light o switch que no estén
+        incluidas mediante etiquetas o áreas.
       default: []
       selector:
         entity:
@@ -58,7 +62,9 @@ blueprint:
     entidades_excluir:
       name: ❌ Entidades excluidas
       description: >
-        Estas entidades nunca se apagarán ni aparecerán en la notificación.
+        Excluye entidades concretas.
+        Si una entidad está también seleccionada como entidad adicional,
+        la inclusión tiene prioridad.
       default: []
       selector:
         entity:
@@ -67,21 +73,6 @@ blueprint:
             - domain: light
             - domain: switch
 
-    incluir_lights:
-      name: 💡 Incluir luces
-      description: >
-        Incluye entidades del dominio light.
-      default: true
-      selector:
-        boolean:
-
-    incluir_switches:
-      name: 🔌 Incluir switches
-      description: >
-        Incluye entidades del dominio switch.
-      default: true
-      selector:
-        boolean:
 
     # =========================================================
     # PERSONAS
@@ -90,25 +81,33 @@ blueprint:
     personas:
       name: 👤 Personas
       description: >
-        Personas utilizadas para determinar cuándo la casa queda vacía.
+        Personas que viven o están consideradas dentro de la casa.
+        El apagado por salida solamente se ejecutará cuando ninguna
+        de ellas permanezca en casa.
       selector:
         entity:
           multiple: true
           filter:
             - domain: person
 
+
     # =========================================================
-    # TRIGGERS
+    # SALIDA
     # =========================================================
 
     usar_salida:
       name: 🚪 Activar al salir
       description: >
-        Ejecuta el apagado cuando una persona seleccionada sale de casa
-        y ninguna de las personas seleccionadas permanece en casa.
+        Ejecuta el apagado cuando una persona sale de casa y se
+        convierte en la última persona en abandonar la vivienda.
       default: true
       selector:
         boolean:
+
+
+    # =========================================================
+    # RFID
+    # =========================================================
 
     usar_tag:
       name: 🏷️ Activar mediante RFID
@@ -126,6 +125,11 @@ blueprint:
       selector:
         text:
 
+
+    # =========================================================
+    # HORA
+    # =========================================================
+
     usar_hora:
       name: ⏰ Activar por hora
       description: >
@@ -140,6 +144,7 @@ blueprint:
       selector:
         time:
 
+
     # =========================================================
     # NOTIFICACIÓN
     # =========================================================
@@ -147,20 +152,21 @@ blueprint:
     notificar:
       name: 📱 Notificar al salir
       description: >
-        Envía una notificación cuando alguien sale de casa y quedan
-        luces o switches encendidos.
+        Envía una notificación cuando la persona que sale es la
+        última persona en abandonar la casa y quedan entidades
+        encendidas.
       default: true
       selector:
         boolean:
 
     servicio_notificacion:
-      name: Servicio de notificación
+      name: 📱 Destinatario de la notificación
       description: >
-        Servicio notify utilizado para enviar la notificación.
-        Ejemplo: notify.mobile_app_victor
-      default: notify.mobile_app_victor
+        Selecciona el servicio de notificación que recibirá el aviso.
+        Por ejemplo, el teléfono de Víctor o el de Idoia.
+      default: notify.notify
       selector:
-        text:
+        notify:
 
 
 # =============================================================
@@ -172,11 +178,9 @@ variables:
   etiquetas_input: !input etiquetas
   areas_incluir_input: !input areas_incluir
   areas_excluir_input: !input areas_excluir
+
   entidades_extra_input: !input entidades_extra
   entidades_excluir_input: !input entidades_excluir
-
-  incluir_lights_input: !input incluir_lights
-  incluir_switches_input: !input incluir_switches
 
   personas_input: !input personas
 
@@ -194,9 +198,12 @@ variables:
 
   entidades_etiquetas: >
     {% set ns = namespace(entidades=[]) %}
+
     {% for etiqueta in etiquetas_input %}
-      {% set ns.entidades = ns.entidades + label_entities(etiqueta) %}
+      {% set ns.entidades =
+        ns.entidades + label_entities(etiqueta) %}
     {% endfor %}
+
     {{ ns.entidades | unique | list }}
 
 
@@ -204,11 +211,14 @@ variables:
   # ENTIDADES DE LAS ÁREAS INCLUIDAS
   # ===========================================================
 
-  entidades_areas: >
+  entidades_areas_incluir: >
     {% set ns = namespace(entidades=[]) %}
+
     {% for area in areas_incluir_input %}
-      {% set ns.entidades = ns.entidades + area_entities(area) %}
+      {% set ns.entidades =
+        ns.entidades + area_entities(area) %}
     {% endfor %}
+
     {{ ns.entidades | unique | list }}
 
 
@@ -216,23 +226,28 @@ variables:
   # ENTIDADES DE LAS ÁREAS EXCLUIDAS
   # ===========================================================
 
-  entidades_areas_excluidas: >
+  entidades_areas_excluir: >
     {% set ns = namespace(entidades=[]) %}
+
     {% for area in areas_excluir_input %}
-      {% set ns.entidades = ns.entidades + area_entities(area) %}
+      {% set ns.entidades =
+        ns.entidades + area_entities(area) %}
     {% endfor %}
+
     {{ ns.entidades | unique | list }}
 
 
   # ===========================================================
-  # UNIR TODAS LAS FUENTES
+  # TODAS LAS ENTIDADES INCLUIDAS
+  #
+  # Etiquetas + áreas + entidades manuales
   # ===========================================================
 
-  entidades_base: >
+  entidades_incluidas: >
     {{
       (
         entidades_etiquetas
-        + entidades_areas
+        + entidades_areas_incluir
         + entidades_extra_input
       )
       | unique
@@ -243,7 +258,7 @@ variables:
   # ===========================================================
   # FILTRADO FINAL
   #
-  # SOLO light y switch pueden entrar.
+  # SOLAMENTE light y switch pueden entrar.
   #
   # automation.*
   # script.*
@@ -252,26 +267,48 @@ variables:
   # etc.
   #
   # quedan automáticamente fuera.
+  #
+  # Las entidades incluidas tienen prioridad sobre exclusiones.
   # ===========================================================
 
   entidades_controladas: >
     {% set ns = namespace(entidades=[]) %}
 
-    {% for entidad in entidades_base %}
+    {% for entidad in entidades_incluidas %}
 
       {% set dominio = entidad.split('.')[0] %}
 
-      {% set dominio_valido =
-        (dominio == 'light' and incluir_lights_input)
-        or
-        (dominio == 'switch' and incluir_switches_input)
-      %}
+      {% if dominio in ['light', 'switch'] %}
 
-      {% if dominio_valido
-            and entidad not in entidades_areas_excluidas
-            and entidad not in entidades_excluir_input %}
+        {% set esta_en_area_excluida =
+          entidad in entidades_areas_excluir %}
 
-        {% set ns.entidades = ns.entidades + [entidad] %}
+        {% set esta_excluida =
+          entidad in entidades_excluir_input %}
+
+        {% set esta_incluida_explicitamente =
+          entidad in entidades_extra_input
+          or entidad in entidades_etiquetas
+          or entidad in entidades_areas_incluir %}
+
+        {#
+          Las inclusiones tienen prioridad.
+          Por tanto, una entidad seleccionada mediante una fuente
+          de inclusión no puede ser eliminada por una exclusión.
+        #}
+
+        {% if esta_incluida_explicitamente %}
+
+          {% set ns.entidades =
+            ns.entidades + [entidad] %}
+
+        {% elif not esta_en_area_excluida
+              and not esta_excluida %}
+
+          {% set ns.entidades =
+            ns.entidades + [entidad] %}
+
+        {% endif %}
 
       {% endif %}
 
@@ -299,7 +336,7 @@ variables:
 triggers:
 
   # -----------------------------------------------------------
-  # TAG RFID
+  # RFID
   # -----------------------------------------------------------
 
   - trigger: tag
@@ -308,7 +345,7 @@ triggers:
 
 
   # -----------------------------------------------------------
-  # SALIDA DE UNA PERSONA
+  # SALIDA DE PERSONA
   # -----------------------------------------------------------
 
   - trigger: state
@@ -333,7 +370,7 @@ triggers:
 conditions:
 
   # -----------------------------------------------------------
-  # Comprobar si el trigger utilizado está activado
+  # Comprobar qué trigger está activado
   # -----------------------------------------------------------
 
   - condition: template
@@ -348,21 +385,26 @@ conditions:
 
 
   # -----------------------------------------------------------
-  # Si es una salida:
-  # actuar solamente cuando TODAS las personas estén fuera.
+  # SALIDA:
+  #
+  # Solo continúa si la persona que acaba de salir es la última.
   # -----------------------------------------------------------
 
   - condition: template
     value_template: >
       {% if trigger.id != 'salida' %}
+
         true
+
       {% else %}
+
         {{
           expand(personas_input)
           | selectattr('state', 'eq', 'home')
           | list
           | length == 0
         }}
+
       {% endif %}
 
 
@@ -391,13 +433,18 @@ actions:
         sequence:
 
           - action: "{{ servicio_notificacion_input }}"
+
             data:
+
               title: "💡 Luces encendidas"
+
               message: >
                 Te has dejado estas entidades encendidas al salir de casa:
 
                 {% for entidad in entidades_encendidas %}
+
                 • {{ state_attr(entidad, 'friendly_name') or entidad }}
+
                 {% endfor %}
 
 
@@ -426,6 +473,7 @@ actions:
               sequence:
 
                 - action: light.turn_off
+
                   target:
                     entity_id: "{{ repeat.item }}"
 
@@ -443,8 +491,10 @@ actions:
               sequence:
 
                 - action: switch.turn_off
+
                   target:
                     entity_id: "{{ repeat.item }}"
 
 
 mode: single
+```
