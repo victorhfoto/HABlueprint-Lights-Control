@@ -1,4 +1,3 @@
-```yaml
 blueprint:
   name: 💡 Apagar iluminación inteligente
   description: >
@@ -497,4 +496,3 @@ actions:
 
 
 mode: single
-```
